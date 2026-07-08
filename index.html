@@ -131,6 +131,32 @@ function autoDownloadBackup(rounds, profile) {
   } catch (e) { console.error("auto backup failed", e); }
 }
 
+async function exportToFile(rounds, profile) {
+  const json = JSON.stringify({ app: "golf-tracker", exportedAt: new Date().toISOString(), profile, rounds }, null, 0);
+  const d = new Date();
+  const stamp = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0") + "-" + String(d.getHours()).padStart(2,"0") + String(d.getMinutes()).padStart(2,"0");
+  const filename = "golf-backup-" + stamp + ".json";
+  try {
+    const file = new File([json], filename, { type: "application/json" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: "ゴルフデータバックアップ" });
+      return "shared";
+    }
+  } catch (e) {
+    if (e && e.name === "AbortError") return "cancelled";
+  }
+  // fallback: normal download (goes to Files > Downloads, or shows a picker per Safari's download setting)
+  try {
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    return "downloaded";
+  } catch (e) { return "failed"; }
+}
+
 const holeScore = h => (h.strokes?.length || 0) + (h.penalties || 0);
 const totalScore = r => (r.holes || []).reduce((s,h) => s + holeScore(h), 0);
 const puttCount = h => (h.strokes || []).filter(s => s.kind === "putt").length;
@@ -294,6 +320,14 @@ function GolfTracker() {
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisMsg, setAnalysisMsg] = useState("");
   const [backupMsg, setBackupMsg] = useState("");
+
+  const exportToFilePicker = async () => {
+    const result = await exportToFile(rounds, profile);
+    if (result === "shared") setBackupMsg("共有シートから保存先を選んで保存してください。");
+    else if (result === "downloaded") setBackupMsg("ファイルとして書き出しました。「ファイル」アプリのダウンロードから確認できます(保存先を毎回選びたい場合は、設定→Safari→ダウンロード→「都度確認」に変更してください)。");
+    else if (result === "cancelled") setBackupMsg("");
+    else setBackupMsg("書き出しに失敗しました。もう一度お試しください。");
+  };
 
   const exportAll = async () => {
     const json = JSON.stringify({ app: "golf-tracker", exportedAt: new Date().toISOString(), profile, rounds }, null, 0);
@@ -582,7 +616,9 @@ function GolfTracker() {
       <div className="p-4">
         <div style={{ fontSize: 14, color: C.sub, marginBottom: 12 }}>
           全ラウンドのデータをJSONとして書き出し、iPhoneのメモやファイルに保存できます。復元は保存したJSONを下の欄に貼り付けて実行します。ラウンド後は書き出しを習慣にするのがおすすめです。</div>
-        <BigBtn onClick={exportAll}>全データを書き出す(コピー)</BigBtn>
+        <BigBtn onClick={exportToFilePicker}>全データをファイルに保存(保存先を選べます)</BigBtn>
+        <div style={{ height: 8 }} />
+        <BigBtn kind="ghost" onClick={exportAll} style={{ border: `2px solid ${C.line}` }}>全データを書き出す(コピー)</BigBtn>
         <div style={{ height: 12 }} />
         <textarea value={backupText} onChange={e => setBackupText(e.target.value)}
           placeholder="復元する場合は、保存しておいたJSONをここに貼り付け"

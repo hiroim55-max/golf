@@ -114,6 +114,23 @@ async function saveAll(rounds, profile) {
   catch (e) { console.error("save failed", e); return false; }
 }
 
+function autoDownloadBackup(rounds, profile) {
+  try {
+    const json = JSON.stringify({ app: "golf-tracker", exportedAt: new Date().toISOString(), profile, rounds }, null, 0);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const d = new Date();
+    const stamp = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0") + "-" + String(d.getHours()).padStart(2,"0") + String(d.getMinutes()).padStart(2,"0");
+    a.href = url;
+    a.download = "golf-backup-" + stamp + ".json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  } catch (e) { console.error("auto backup failed", e); }
+}
+
 const holeScore = h => (h.strokes?.length || 0) + (h.penalties || 0);
 const totalScore = r => (r.holes || []).reduce((s,h) => s + holeScore(h), 0);
 const puttCount = h => (h.strokes || []).filter(s => s.kind === "putt").length;
@@ -460,7 +477,7 @@ function GolfTracker() {
   };
 
   const nextHole = async () => {
-    if (holeIdx + 1 >= 18) { await persist({ ...round, done: true }); setScreen("summary"); }
+    if (holeIdx + 1 >= 18) { const done = { ...round, done: true }; await persist(done); autoDownloadBackup([done, ...rounds.filter(x => x.id !== done.id)], profile); setScreen("summary"); }
     else { setHoleIdx(holeIdx + 1); setScreen("hole"); }
   };
 
@@ -752,7 +769,7 @@ function GolfTracker() {
           <div style={{ marginTop: 40 }}>
             <BigBtn onClick={nextHole}>{holeIdx + 1 >= 18 ? "ラウンド終了・集計へ" : `HOLE ${holeIdx + 2} へ`}</BigBtn>
             <div style={{ height: 10 }} />
-            <BigBtn kind="ghost" onClick={async () => { await persist({ ...round, done: true }); setScreen("summary"); }}
+            <BigBtn kind="ghost" onClick={async () => { const done = { ...round, done: true }; await persist(done); autoDownloadBackup([done, ...rounds.filter(x => x.id !== done.id)], profile); setScreen("summary"); }}
               style={{ border: `2px solid ${C.line}` }}>ここでラウンドを終える</BigBtn>
           </div>
         </div>
@@ -789,6 +806,7 @@ function GolfTracker() {
           <div className="text-center" style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 56, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{total}</div>
             <div style={{ color: C.sub, fontSize: 14 }}>{round.course}・{round.date}・目標 {round.target}{round.weather ? `・${round.weather}/風${round.wind}/${round.tee}T` : ""}</div>
+            <div style={{ color: C.sub, fontSize: 12, marginTop: 4 }}>バックアップを自動保存しました(ファイルApp→ダウンロード)</div>
           </div>
           <div className="grid grid-cols-3 gap-2 mb-4">
             {stat("FWキープ率", fwKeep + "%")}{stat("パーオン", gir + "H")}{stat("総パット", putts)}

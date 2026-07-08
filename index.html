@@ -515,6 +515,14 @@ function GolfTracker() {
     else { setHoleIdx(holeIdx + 1); setScreen("hole"); }
   };
 
+  const deleteRound = async entry => {
+    const label = `${entry.date} ${entry.course}(${entry.done ? "スコア" + (entry.score ?? "-") : "記録中"})`;
+    if (!window.confirm(label + "を削除しますか?この操作は取り消せません。")) return;
+    const next = rounds.filter(x => x.id !== entry.id);
+    setRounds(next);
+    if (storageOk) await saveAll(next, profile);
+  };
+
   const openRound = entry => {
     const rd = rounds.find(x => x.id === entry.id);
     if (!rd) return alert("読み込みに失敗しました");
@@ -549,11 +557,15 @@ function GolfTracker() {
         <div style={{ marginTop: 24, fontSize: 13, fontWeight: 700, color: C.sub }}>過去のラウンド</div>
         {index.length === 0 && <div style={{ color: C.sub, marginTop: 8, fontSize: 15 }}>まだ記録がありません。最初のラウンドを始めましょう。</div>}
         {index.map(e => (
-          <button key={e.id} onClick={() => openRound(e)} className="w-full rounded-xl mt-2 text-left flex justify-between items-center"
-            style={{ background: C.card, border: `1px solid ${C.line}`, padding: "14px 16px" }}>
-            <div><div style={{ fontWeight: 700 }}>{e.course}</div><div style={{ fontSize: 13, color: C.sub }}>{e.date}{e.done ? "" : "・記録中"}</div></div>
-            <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{e.score || "–"}</div>
-          </button>
+          <div key={e.id} className="w-full rounded-xl mt-2 flex items-center"
+            style={{ background: C.card, border: `1px solid ${C.line}` }}>
+            <button onClick={() => openRound(e)} className="flex-1 text-left flex justify-between items-center"
+              style={{ padding: "14px 16px", background: "transparent", border: "none" }}>
+              <div><div style={{ fontWeight: 700 }}>{e.course}</div><div style={{ fontSize: 13, color: C.sub }}>{e.date}{e.done ? "" : "・記録中"}</div></div>
+              <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{e.score || "–"}</div>
+            </button>
+            <button onClick={() => deleteRound(e)} style={{ padding: "14px 14px", color: C.sub, fontSize: 20, background: "transparent", border: "none" }}>🗑</button>
+          </div>
         ))}
       </div>
     </div>

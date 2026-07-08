@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ゴルフ記録">
+<title>ゴルフ ラウンド記録</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9971;</text></svg>">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  html, body { margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  button { cursor: pointer; }
+  input, textarea { -webkit-appearance: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+// localStorage adapter: window.storage API compatible with the artifact version
+window.storage = {
+  async get(key) {
+    const v = localStorage.getItem("golf_" + key);
+    if (v === null) throw new Error("key not found: " + key);
+    return { key, value: v, shared: false };
+  },
+  async set(key, value) {
+    localStorage.setItem("golf_" + key, value);
+    return { key, value, shared: false };
+  },
+  async delete(key) {
+    localStorage.removeItem("golf_" + key);
+    return { key, deleted: true, shared: false };
+  },
+  async list(prefix) {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("golf_") && (!prefix || k.slice(5).startsWith(prefix))) keys.push(k.slice(5));
+    }
+    return { keys, shared: false };
+  },
+};
+</script>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect } = React;
+
+// ---- design tokens ----
+const C = {
+  bg: "#F5F4EE",        // 日光下で読みやすい明色地
+  card: "#FFFFFF",
+  ink: "#182620",       // 深い墨緑
+  sub: "#5C6B62",
+  green: "#1E5C3F",     // ピングリーン(主色)
+  greenSoft: "#E3EEE7",
+  red: "#B0372A",       // OB・池
+  sand: "#B8912F",      // バンカー
+  line: "#DDDAD0",
+};
+
+const CLUBS = ["DR","5W","4U","5U","6U","6I","7I","8I","9I","PW","AW","SW","58°","パター"];
+const LIES = ["ティー","フェアウェイ","ラフ","バンカー"];
+const SLOPES = ["平ら","左足上がり","左足下がり","前上がり","前下がり"];
+const FLIGHTS = ["フック","ストレート","スライス"];
+const SHOT_RESULTS = ["フェアウェイ","ラフ","グリーンオン","バンカー","OB","池"];
+const SHOT_RESULTS_GREEN = ["グリーンオン","手前","奥","左","右","バンカー","OB","池"];
+const APP_TYPES = ["ランニング","ピッチ&ラン","ロブ","その他"];
+const APP_RESULTS = ["オン","チップイン","手前に外す","奥に外す","バンカー"];
+const PUTT_SLOPES = ["上り","平ら","下り"];
+const PUTT_LINES = ["ストレート","フック","スライス"];
+const PUTT_RESULTS = ["カップイン","ショート","オーバー"];
+const STEP_PRESETS = [1,2,3,4,5,7,10,15,20];
+
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+
+const DEFAULT_PROFILE = {
+  avg: 90, best: 85, target: 85,
+  practice: "週2〜3回(練習場)", lesson: "週1回コーチのレッスン", roundsPerMonth: "月3〜4回", note: ""
+};
+
+const TEST_DATA_JSON = `{"app":"golf-tracker","exportedAt":"2026-07-08T09:00:00Z","rounds":[{"id":"test3","date":"2026-06-28","course":"青葉台CC(テスト)","target":85,"holes":[{"n":1,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"ストレート","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"6U","lie":"ラフ","slopes":["前上がり"],"flight":"ストレート","result":"右","greenAttempt":true},{"kind":"approach","dist":30,"club":"SW","type":"ピッチ&ラン","result":"バンカー"},{"kind":"shot","club":"SW","lie":"バンカー","slopes":["左足下がり"],"flight":"ストレート","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":7,"slope":"下り","line":"ストレート","result":"ショート"},{"kind":"putt","steps":1,"slope":"上り","line":"スライス","result":"カップイン"}],"penalties":0},{"n":2,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"ストレート","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"9I","lie":"フェアウェイ","slopes":["平ら"],"flight":"ストレート","result":"右","greenAttempt":true},{"kind":"approach","dist":30,"club":"SW","type":"ロブ","result":"オン"},{"kind":"putt","steps":15,"slope":"上り","line":"スライス","result":"ショート"},{"kind":"putt","steps":2,"slope":"下り","line":"ストレート","result":"カップイン"}],"penalties":0},{"n":3,"par":3,"strokes":[{"kind":"shot","club":"6I","lie":"ティー","slopes":["平ら"],"flight":"ストレート","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":3,"slope":"下り","line":"フック","result":"ショート"},{"kind":"putt","steps":1,"slope":"平ら","line":"ストレート","result":"カップイン"}],"penalties":0},{"n":4,"par":5,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"5W","lie":"フェアウェイ","slopes":["平ら"],"flight":"ストレート","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"AW","lie":"フェアウェイ","slopes":["左足上がり"],"flight":"ストレート","result":"右","greenAttempt":true},{"kind":"approach","dist":30,"club":"PW","type":"ピッチ&ラン","result":"バンカー"},{"kind":"shot","club":"SW","lie":"バンカー","slopes":["左足下がり"],"flight":"スライス","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":10,"slope":"上り","line":"フック","result":"ショート"},{"kind":"putt","steps":2,"slope":"下り","line":"ストレート","result":"カップイン"}],"penalties":0},{"n":5,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"8I","lie":"フェアウェイ","slopes":["左足下がり"],"flight":"スライス","result":"手前","greenAttempt":true},{"kind":"approach","dist":40,"club":"PW","type":"ピッチ&ラン","result":"オン"},{"kind":"putt","steps":3,"slope":"平ら","line":"ストレート","result":"ショート"},{"kind":"putt","steps":1,"slope":"下り","line":"フック","result":"カップイン"}],"penalties":0},{"n":6,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"8I","lie":"ラフ","slopes":["平ら"],"flight":"スライス","result":"手前","greenAttempt":true},{"kind":"approach","dist":40,"club":"58°","type":"ロブ","result":"手前に外す"},{"kind":"shot","club":"SW","lie":"バンカー","slopes":["前上がり"],"flight":"スライス","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":5,"slope":"上り","line":"フック","result":"ショート"},{"kind":"putt","steps":1,"slope":"上り","line":"フック","result":"カップイン"}],"penalties":0},{"n":7,"par":3,"strokes":[{"kind":"shot","club":"6I","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":3,"slope":"上り","line":"スライス","result":"カップイン"}],"penalties":0},{"n":8,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"ストレート","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"6U","lie":"フェアウェイ","slopes":["平ら"],"flight":"ストレート","result":"手前","greenAttempt":true},{"kind":"approach","dist":50,"club":"58°","type":"ロブ","result":"バンカー"},{"kind":"shot","club":"SW","lie":"バンカー","slopes":["平ら"],"flight":"ストレート","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":4,"slope":"平ら","line":"ストレート","result":"オーバー"},{"kind":"putt","steps":1,"slope":"平ら","line":"フック","result":"カップイン"}],"penalties":0},{"n":9,"par":5,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"5U","lie":"フェアウェイ","slopes":["平ら"],"flight":"スライス","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"PW","lie":"ラフ","slopes":["平ら"],"flight":"スライス","result":"左","greenAttempt":true},{"kind":"approach","dist":20,"club":"PW","type":"ランニング","result":"手前に外す"},{"kind":"shot","club":"SW","lie":"バンカー","slopes":["前上がり"],"flight":"ストレート","result":"右","greenAttempt":true},{"kind":"approach","dist":30,"club":"AW","type":"その他","result":"オン"},{"kind":"putt","steps":20,"slope":"下り","line":"フック","result":"オーバー"},{"kind":"putt","steps":1,"slope":"平ら","line":"スライス","result":"カップイン"}],"penalties":0},{"n":10,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"9I","lie":"ラフ","slopes":["平ら"],"flight":"フック","result":"右","greenAttempt":true},{"kind":"approach","dist":30,"club":"SW","type":"ピッチ&ラン","result":"オン"},{"kind":"putt","steps":5,"slope":"平ら","line":"スライス","result":"カップイン"}],"penalties":0},{"n":11,"par":3,"strokes":[{"kind":"shot","club":"6U","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":7,"slope":"平ら","line":"フック","result":"カップイン"}],"penalties":0},{"n":12,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"8I","lie":"フェアウェイ","slopes":["左足上がり"],"flight":"フック","result":"右","greenAttempt":true},{"kind":"approach","dist":60,"club":"AW","type":"ランニング","result":"手前に外す"},{"kind":"shot","club":"SW","lie":"バンカー","slopes":["平ら"],"flight":"スライス","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":7,"slope":"上り","line":"ストレート","result":"オーバー"},{"kind":"putt","steps":1,"slope":"上り","line":"ストレート","result":"カップイン"}],"penalties":0},{"n":13,"par":5,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"5W","lie":"ラフ","slopes":["平ら"],"flight":"ストレート","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"9I","lie":"フェアウェイ","slopes":["平ら"],"flight":"スライス","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":4,"slope":"平ら","line":"スライス","result":"ショート"},{"kind":"putt","steps":1,"slope":"上り","line":"ストレート","result":"カップイン"}],"penalties":0},{"n":14,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"フック","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"9I","lie":"フェアウェイ","slopes":["平ら"],"flight":"スライス","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":5,"slope":"平ら","line":"フック","result":"ショート"},{"kind":"putt","steps":1,"slope":"平ら","line":"ストレート","result":"カップイン"}],"penalties":0},{"n":15,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"9I","lie":"ラフ","slopes":["平ら"],"flight":"スライス","result":"左","greenAttempt":true},{"kind":"approach","dist":30,"club":"PW","type":"ピッチ&ラン","result":"手前に外す"},{"kind":"shot","club":"SW","lie":"バンカー","slopes":["平ら"],"flight":"スライス","result":"手前","greenAttempt":true},{"kind":"approach","dist":40,"club":"PW","type":"ピッチ&ラン","result":"チップイン"}],"penalties":0},{"n":16,"par":3,"strokes":[{"kind":"shot","club":"8I","lie":"ティー","slopes":["前下がり"],"flight":"ストレート","result":"手前","greenAttempt":true},{"kind":"approach","dist":30,"club":"PW","type":"ロブ","result":"奥に外す"},{"kind":"putt","steps":3,"slope":"下り","line":"フック","result":"オーバー"},{"kind":"putt","steps":1,"slope":"下り","line":"ストレート","result":"カップイン"}],"penalties":0},{"n":17,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"ストレート","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"6U","lie":"フェアウェイ","slopes":["左足下がり"],"flight":"スライス","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":7,"slope":"上り","line":"スライス","result":"ショート"},{"kind":"putt","steps":1,"slope":"下り","line":"フック","result":"カップイン"}],"penalties":0},{"n":18,"par":5,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"ストレート","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"5U","lie":"フェアウェイ","slopes":["平ら"],"flight":"フック","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"9I","lie":"フェアウェイ","slopes":["平ら"],"flight":"ストレート","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":7,"slope":"下り","line":"スライス","result":"オーバー"},{"kind":"putt","steps":2,"slope":"下り","line":"スライス","result":"カップイン"}],"penalties":0}],"done":true},{"id":"test2","date":"2026-06-07","course":"緑ヶ丘GC(テスト)","target":85,"holes":[{"n":1,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"7I","lie":"フェアウェイ","slopes":["前上がり"],"flight":"フック","result":"左","greenAttempt":true},{"kind":"approach","dist":40,"club":"SW","type":"ピッチ&ラン","result":"オン"},{"kind":"putt","steps":10,"slope":"平ら","line":"ストレート","result":"オーバー"},{"kind":"putt","steps":2,"slope":"下り","line":"スライス","result":"カップイン"}],"penalties":0},{"n":2,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"OB","greenAttempt":false},{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"フック","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"9I","lie":"フェアウェイ","slopes":["平ら"],"flight":"スライス","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":2,"slope":"上り","line":"ストレート","result":"カップイン"}],"penalties":1},{"n":3,"par":3,"strokes":[{"kind":"shot","club":"6I","lie":"ティー","slopes":["平ら"],"flight":"ストレート","result":"手前","greenAttempt":true},{"kind":"approach","dist":30,"club":"58°","type":"ランニング","result":"オン"},{"kind":"putt","steps":10,"slope":"平ら","line":"ストレート","result":"オーバー"},{"kind":"putt","steps":1,"slope":"下り","line":"スライス","result":"カップイン"}],"penalties":0},{"n":4,"par":5,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"OB","greenAttempt":false},{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"5U","lie":"ラフ","slopes":["平ら"],"flight":"ストレート","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"9I","lie":"ラフ","slopes":["左足上がり"],"flight":"ストレート","result":"手前","greenAttempt":true},{"kind":"approach","dist":50,"club":"AW","type":"ピッチ&ラン","result":"手前に外す"},{"kind":"putt","steps":2,"slope":"下り","line":"フック","result":"カップイン"}],"penalties":1},{"n":5,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"8I","lie":"ラフ","slopes":["左足上がり"],"flight":"ストレート","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":7,"slope":"上り","line":"スライス","result":"オーバー"},{"kind":"putt","steps":2,"slope":"平ら","line":"スライス","result":"カップイン"}],"penalties":0},{"n":6,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"OB","greenAttempt":false},{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"フック","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"7I","lie":"フェアウェイ","slopes":["左足上がり"],"flight":"スライス","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":10,"slope":"上り","line":"ストレート","result":"ショート"},{"kind":"putt","steps":2,"slope":"上り","line":"フック","result":"カップイン"}],"penalties":1},{"n":7,"par":3,"strokes":[{"kind":"shot","club":"6I","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":7,"slope":"上り","line":"ストレート","result":"カップイン"}],"penalties":0},{"n":8,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"フック","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"9I","lie":"ラフ","slopes":["平ら"],"flight":"ストレート","result":"右","greenAttempt":true},{"kind":"approach","dist":50,"club":"AW","type":"ロブ","result":"オン"},{"kind":"putt","steps":10,"slope":"平ら","line":"スライス","result":"ショート"},{"kind":"putt","steps":2,"slope":"平ら","line":"フック","result":"カップイン"}],"penalties":0},{"n":9,"par":5,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"ストレート","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"5W","lie":"フェアウェイ","slopes":["平ら"],"flight":"ストレート","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"9I","lie":"フェアウェイ","slopes":["平ら"],"flight":"ストレート","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":4,"slope":"上り","line":"ストレート","result":"ショート"},{"kind":"putt","steps":1,"slope":"平ら","line":"スライス","result":"カップイン"}],"penalties":0},{"n":10,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"フック","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"7I","lie":"ラフ","slopes":["前下がり"],"flight":"ストレート","result":"右","greenAttempt":true},{"kind":"approach","dist":30,"club":"AW","type":"ロブ","result":"手前に外す"},{"kind":"shot","club":"SW","lie":"バンカー","slopes":["左足下がり"],"flight":"スライス","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":15,"slope":"上り","line":"スライス","result":"オーバー"},{"kind":"putt","steps":1,"slope":"平ら","line":"フック","result":"カップイン"}],"penalties":0},{"n":11,"par":3,"strokes":[{"kind":"shot","club":"8I","lie":"ティー","slopes":["前上がり"],"flight":"スライス","result":"左","greenAttempt":true},{"kind":"approach","dist":20,"club":"SW","type":"その他","result":"手前に外す"},{"kind":"putt","steps":10,"slope":"上り","line":"ストレート","result":"ショート"},{"kind":"putt","steps":2,"slope":"上り","line":"フック","result":"カップイン"}],"penalties":0},{"n":12,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"ストレート","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"9I","lie":"ラフ","slopes":["前下がり"],"flight":"フック","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":7,"slope":"平ら","line":"スライス","result":"オーバー"},{"kind":"putt","steps":2,"slope":"上り","line":"フック","result":"カップイン"}],"penalties":0},{"n":13,"par":5,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"OB","greenAttempt":false},{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"4U","lie":"フェアウェイ","slopes":["平ら"],"flight":"ストレート","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"9I","lie":"フェアウェイ","slopes":["平ら"],"flight":"ストレート","result":"手前","greenAttempt":true},{"kind":"approach","dist":20,"club":"58°","type":"ピッチ&ラン","result":"バンカー"},{"kind":"shot","club":"SW","lie":"バンカー","slopes":["平ら"],"flight":"ストレート","result":"手前","greenAttempt":true},{"kind":"approach","dist":50,"club":"AW","type":"ピッチ&ラン","result":"手前に外す"},{"kind":"putt","steps":10,"slope":"上り","line":"フック","result":"オーバー"},{"kind":"putt","steps":2,"slope":"上り","line":"ストレート","result":"カップイン"}],"penalties":1},{"n":14,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"フック","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"9I","lie":"フェアウェイ","slopes":["左足下がり"],"flight":"スライス","result":"右","greenAttempt":true},{"kind":"approach","dist":30,"club":"PW","type":"ランニング","result":"チップイン"}],"penalties":0},{"n":15,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"ストレート","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"9I","lie":"ラフ","slopes":["前上がり","前下がり"],"flight":"ストレート","result":"左","greenAttempt":true},{"kind":"approach","dist":30,"club":"PW","type":"ピッチ&ラン","result":"手前に外す"},{"kind":"putt","steps":15,"slope":"平ら","line":"フック","result":"オーバー"},{"kind":"putt","steps":1,"slope":"下り","line":"フック","result":"カップイン"}],"penalties":0},{"n":16,"par":3,"strokes":[{"kind":"shot","club":"6U","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":10,"slope":"下り","line":"ストレート","result":"オーバー"},{"kind":"putt","steps":1,"slope":"下り","line":"スライス","result":"カップイン"}],"penalties":0},{"n":17,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"8I","lie":"ラフ","slopes":["平ら"],"flight":"フック","result":"バンカー","greenAttempt":true},{"kind":"shot","club":"SW","lie":"バンカー","slopes":["平ら"],"flight":"スライス","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":5,"slope":"平ら","line":"ストレート","result":"オーバー"},{"kind":"putt","steps":1,"slope":"平ら","line":"スライス","result":"カップイン"}],"penalties":0},{"n":18,"par":5,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"ストレート","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"5U","lie":"フェアウェイ","slopes":["平ら"],"flight":"スライス","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"AW","lie":"フェアウェイ","slopes":["平ら"],"flight":"スライス","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":3,"slope":"下り","line":"フック","result":"ショート"},{"kind":"putt","steps":1,"slope":"平ら","line":"ストレート","result":"カップイン"}],"penalties":0}],"done":true},{"id":"test1","date":"2026-05-17","course":"青葉台CC(テスト)","target":85,"holes":[{"n":1,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"フック","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"9I","lie":"フェアウェイ","slopes":["左足上がり"],"flight":"ストレート","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":5,"slope":"平ら","line":"フック","result":"ショート"},{"kind":"putt","steps":1,"slope":"上り","line":"スライス","result":"カップイン"}],"penalties":0},{"n":2,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"ストレート","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"9I","lie":"フェアウェイ","slopes":["前下がり"],"flight":"スライス","result":"手前","greenAttempt":true},{"kind":"approach","dist":30,"club":"SW","type":"ピッチ&ラン","result":"手前に外す"},{"kind":"putt","steps":3,"slope":"下り","line":"フック","result":"カップイン"}],"penalties":0},{"n":3,"par":3,"strokes":[{"kind":"shot","club":"7I","lie":"ティー","slopes":["平ら"],"flight":"ストレート","result":"手前","greenAttempt":true},{"kind":"approach","dist":40,"club":"SW","type":"ロブ","result":"オン"},{"kind":"putt","steps":10,"slope":"平ら","line":"フック","result":"オーバー"},{"kind":"putt","steps":2,"slope":"上り","line":"スライス","result":"カップイン"}],"penalties":0},{"n":4,"par":5,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"OB","greenAttempt":false},{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"5W","lie":"フェアウェイ","slopes":["平ら"],"flight":"スライス","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"AW","lie":"フェアウェイ","slopes":["左足下がり"],"flight":"スライス","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":4,"slope":"上り","line":"ストレート","result":"カップイン"}],"penalties":1},{"n":5,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"ストレート","result":"バンカー","greenAttempt":false},{"kind":"shot","club":"SW","lie":"バンカー","slopes":["左足下がり"],"flight":"ストレート","result":"手前","greenAttempt":true},{"kind":"approach","dist":50,"club":"SW","type":"ピッチ&ラン","result":"手前に外す"},{"kind":"putt","steps":10,"slope":"上り","line":"スライス","result":"ショート"},{"kind":"putt","steps":2,"slope":"上り","line":"スライス","result":"カップイン"}],"penalties":0},{"n":6,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"9I","lie":"ラフ","slopes":["前下がり"],"flight":"ストレート","result":"手前","greenAttempt":true},{"kind":"approach","dist":40,"club":"SW","type":"ランニング","result":"手前に外す"},{"kind":"shot","club":"SW","lie":"バンカー","slopes":["左足下がり"],"flight":"スライス","result":"手前","greenAttempt":true},{"kind":"approach","dist":40,"club":"SW","type":"ピッチ&ラン","result":"手前に外す"},{"kind":"putt","steps":15,"slope":"上り","line":"フック","result":"ショート"},{"kind":"putt","steps":2,"slope":"上り","line":"スライス","result":"カップイン"}],"penalties":0},{"n":7,"par":3,"strokes":[{"kind":"shot","club":"7I","lie":"ティー","slopes":["前上がり","左足上がり"],"flight":"ストレート","result":"手前","greenAttempt":true},{"kind":"approach","dist":60,"club":"SW","type":"ピッチ&ラン","result":"オン"},{"kind":"putt","steps":5,"slope":"平ら","line":"スライス","result":"オーバー"},{"kind":"putt","steps":1,"slope":"上り","line":"フック","result":"カップイン"}],"penalties":0},{"n":8,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"フック","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"PW","lie":"ラフ","slopes":["前上がり"],"flight":"スライス","result":"バンカー","greenAttempt":true},{"kind":"shot","club":"SW","lie":"バンカー","slopes":["平ら"],"flight":"ストレート","result":"手前","greenAttempt":true},{"kind":"approach","dist":20,"club":"SW","type":"ピッチ&ラン","result":"オン"},{"kind":"putt","steps":7,"slope":"平ら","line":"スライス","result":"カップイン"}],"penalties":0},{"n":9,"par":5,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"ストレート","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"5W","lie":"ラフ","slopes":["平ら"],"flight":"ストレート","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"AW","lie":"ラフ","slopes":["前下がり"],"flight":"ストレート","result":"奥","greenAttempt":true},{"kind":"approach","dist":30,"club":"58°","type":"ピッチ&ラン","result":"オン"},{"kind":"putt","steps":20,"slope":"下り","line":"スライス","result":"ショート"},{"kind":"putt","steps":2,"slope":"上り","line":"ストレート","result":"カップイン"}],"penalties":0},{"n":10,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"フック","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"6U","lie":"フェアウェイ","slopes":["左足下がり"],"flight":"ストレート","result":"手前","greenAttempt":true},{"kind":"approach","dist":50,"club":"SW","type":"ピッチ&ラン","result":"オン"},{"kind":"putt","steps":3,"slope":"上り","line":"フック","result":"オーバー"},{"kind":"putt","steps":1,"slope":"平ら","line":"スライス","result":"カップイン"}],"penalties":0},{"n":11,"par":3,"strokes":[{"kind":"shot","club":"6U","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"手前","greenAttempt":true},{"kind":"approach","dist":40,"club":"PW","type":"ピッチ&ラン","result":"奥に外す"},{"kind":"shot","club":"SW","lie":"バンカー","slopes":["平ら"],"flight":"ストレート","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":5,"slope":"下り","line":"ストレート","result":"オーバー"},{"kind":"putt","steps":1,"slope":"平ら","line":"フック","result":"カップイン"}],"penalties":0},{"n":12,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"ストレート","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"6U","lie":"フェアウェイ","slopes":["左足下がり"],"flight":"ストレート","result":"右","greenAttempt":true},{"kind":"approach","dist":30,"club":"PW","type":"ランニング","result":"オン"},{"kind":"putt","steps":4,"slope":"上り","line":"ストレート","result":"ショート"},{"kind":"putt","steps":1,"slope":"下り","line":"スライス","result":"カップイン"}],"penalties":0},{"n":13,"par":5,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"フック","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"4U","lie":"フェアウェイ","slopes":["平ら"],"flight":"ストレート","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"AW","lie":"フェアウェイ","slopes":["左足上がり"],"flight":"ストレート","result":"手前","greenAttempt":true},{"kind":"approach","dist":30,"club":"58°","type":"ランニング","result":"オン"},{"kind":"putt","steps":2,"slope":"下り","line":"フック","result":"カップイン"}],"penalties":0},{"n":14,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"ストレート","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"6U","lie":"フェアウェイ","slopes":["前下がり"],"flight":"スライス","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":10,"slope":"平ら","line":"ストレート","result":"オーバー"},{"kind":"putt","steps":1,"slope":"上り","line":"ストレート","result":"カップイン"}],"penalties":0},{"n":15,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"OB","greenAttempt":false},{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"フック","result":"バンカー","greenAttempt":false},{"kind":"shot","club":"SW","lie":"バンカー","slopes":["平ら"],"flight":"ストレート","result":"手前","greenAttempt":true},{"kind":"approach","dist":30,"club":"AW","type":"ランニング","result":"バンカー"},{"kind":"shot","club":"SW","lie":"バンカー","slopes":["前上がり"],"flight":"ストレート","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":10,"slope":"平ら","line":"ストレート","result":"ショート"},{"kind":"putt","steps":2,"slope":"上り","line":"ストレート","result":"オーバー"},{"kind":"putt","steps":1,"slope":"下り","line":"ストレート","result":"カップイン"}],"penalties":1},{"n":16,"par":3,"strokes":[{"kind":"shot","club":"6I","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"右","greenAttempt":true},{"kind":"approach","dist":50,"club":"PW","type":"ピッチ&ラン","result":"オン"},{"kind":"putt","steps":10,"slope":"上り","line":"スライス","result":"ショート"},{"kind":"putt","steps":2,"slope":"平ら","line":"スライス","result":"カップイン"}],"penalties":0},{"n":17,"par":4,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"6U","lie":"ラフ","slopes":["左足上がり","左足下がり"],"flight":"スライス","result":"池","greenAttempt":true},{"kind":"approach","dist":20,"club":"PW","type":"ランニング","result":"オン"},{"kind":"putt","steps":2,"slope":"上り","line":"ストレート","result":"オーバー"},{"kind":"putt","steps":1,"slope":"平ら","line":"ストレート","result":"カップイン"}],"penalties":1},{"n":18,"par":5,"strokes":[{"kind":"shot","club":"DR","lie":"ティー","slopes":["平ら"],"flight":"スライス","result":"ラフ","greenAttempt":false},{"kind":"shot","club":"5W","lie":"ラフ","slopes":["平ら"],"flight":"ストレート","result":"フェアウェイ","greenAttempt":false},{"kind":"shot","club":"9I","lie":"フェアウェイ","slopes":["左足上がり","前上がり"],"flight":"ストレート","result":"グリーンオン","greenAttempt":true},{"kind":"putt","steps":2,"slope":"下り","line":"フック","result":"カップイン"}],"penalties":0}],"done":true}]}`;
+
+const STORE_KEY = "golf-all-data";
+async function loadAll() {
+  try {
+    const d = JSON.parse((await window.storage.get(STORE_KEY)).value);
+    return { rounds: d.rounds || [], profile: { ...DEFAULT_PROFILE, ...(d.profile || {}) } };
+  } catch {}
+  // 旧形式(ラウンド別キー)からの自動移行
+  try {
+    const ri = await window.storage.get("rounds-index");
+    const idx = JSON.parse(ri.value) || [];
+    const rounds = [];
+    for (const e of idx) {
+      try { const r = await window.storage.get("round-" + e.id); rounds.push(JSON.parse(r.value)); } catch {}
+    }
+    if (rounds.length) { await window.storage.set(STORE_KEY, JSON.stringify({ rounds, profile: DEFAULT_PROFILE })); return { rounds, profile: DEFAULT_PROFILE }; }
+  } catch {}
+  return { rounds: [], profile: DEFAULT_PROFILE };
+}
+async function probeStorage() {
+  try {
+    if (!window.storage) return false;
+    const r = await window.storage.set("golf-probe", "1");
+    return !!r;
+  } catch { return false; }
+}
+async function saveAll(rounds, profile) {
+  try { const r = await window.storage.set(STORE_KEY, JSON.stringify({ rounds, profile })); return !!r; }
+  catch (e) { console.error("save failed", e); return false; }
+}
+
+const holeScore = h => (h.strokes?.length || 0) + (h.penalties || 0);
+const totalScore = r => (r.holes || []).reduce((s,h) => s + holeScore(h), 0);
+const puttCount = h => (h.strokes || []).filter(s => s.kind === "putt").length;
+
+const fmtStroke = s => {
+  if (s.kind === "putt") return "パット" + s.steps + "歩 " + s.slope + "/" + s.line + "→" + s.result;
+  if (s.kind === "approach") return "アプローチ" + s.dist + "y " + s.club + " " + s.type + "→" + s.result;
+  const sl = (s.slopes || ["平ら"]).join("+");
+  return s.club + " " + s.lie + (sl !== "平ら" ? "(" + sl + ")" : "") + " " + s.flight + (s.greenAttempt ? "[グリーン狙い]" : "") + "→" + s.result;
+};
+
+const roundStats = r => {
+  const hs = r.holes || [];
+  const all = hs.flatMap(h => h.strokes || []);
+  const tee = hs.filter(h => h.par >= 4 && h.strokes[0] && h.strokes[0].kind === "shot");
+  const gir = hs.filter(h => {
+    const lim = h.par - 2;
+    return (h.strokes || []).some((s, i) => i < lim && ((s.kind === "shot" && s.result === "グリーンオン") || (s.kind === "approach" && (s.result === "オン" || s.result === "チップイン"))));
+  }).length;
+  return {
+    total: totalScore(r),
+    putts: hs.reduce((s, h) => s + puttCount(h), 0),
+    threePutt: hs.filter(h => puttCount(h) >= 3).length,
+    dblPlus: hs.filter(h => holeScore(h) - h.par >= 2).length,
+    fwKeep: tee.length ? Math.round(100 * tee.filter(h => h.strokes[0].result === "フェアウェイ").length / tee.length) : 0,
+    gir,
+    ob: all.filter(s => s.kind === "shot" && s.result === "OB").length,
+    water: all.filter(s => s.kind === "shot" && s.result === "池").length,
+    bunker: all.filter(s => (s.kind === "shot" || s.kind === "approach") && s.result === "バンカー").length,
+  };
+};
+
+const buildAnalysisPrompt = (rounds, profile) => {
+  const rs = [...rounds].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-5);
+  let out = "";
+  out += "あなたはゴルフのティーチングプロ兼データアナリストです。以下の私のプロフィールとラウンドデータ(1打ごとの記録)を分析してください。\n\n";
+  out += "# プロフィール\n";
+  out += "- 平均スコア: " + profile.avg + " / ベスト: " + profile.best + " / 目標: " + profile.target + "\n";
+  out += "- 練習: " + profile.practice + " / レッスン: " + profile.lesson + " / ラウンド: " + profile.roundsPerMonth + "\n";
+  if (profile.note) out += "- メモ: " + profile.note + "\n";
+  out += "\n# ラウンドデータ(古い順、直近" + rs.length + "ラウンド)\n";
+  for (const r of rs) {
+    const st = roundStats(r);
+    out += "\n## " + r.date + " " + r.course + " スコア" + st.total + (r.weather ? "(天気:" + r.weather + " 風:" + r.wind + " ティー:" + r.tee + ")" : "") + "\n";
+    out += "集計: FWキープ" + st.fwKeep + "% / パーオン" + st.gir + "H / パット" + st.putts + " / 3パット" + st.threePutt + " / ダボ以上" + st.dblPlus + "H / OB" + st.ob + " / 池" + st.water + " / バンカー" + st.bunker + "\n";
+    for (const h of r.holes) {
+      out += "H" + h.n + " Par" + h.par + " スコア" + holeScore(h) + (h.penalties ? "(ペナ" + h.penalties + ")" : "") + ": ";
+      out += (h.strokes || []).map(fmtStroke).join(" / ") + "\n";
+    }
+  }
+  out += "\n# 分析してほしいこと\n";
+  out += "1. 失点源の定量分析: 目標スコアとの差がどこで生まれているか(ペナルティ、ダボ以上ホールの原因、3パット、グリーン周り)を打数ベースで示す\n";
+  out += "2. 傾向の特定: クラブ別・ライ別・傾斜別のミス傾向(球筋と方向)、アプローチの距離帯別成功率、パットの距離帯・傾斜・ライン別の傾向\n";
+  out += "3. 複数ラウンドの推移: 改善している点と停滞・悪化している点\n";
+  out += "4. 練習の優先順位トップ3: それぞれ「なぜ優先か(削減できる打数の見込み)」と「練習場でできる具体的なドリル(球数・やり方・成功基準)」。練習は" + profile.practice + "を想定\n";
+  out += "5. 次のラウンドの数値目標: FWキープ率、パーオン数、パット数、ペナルティ数など、測定可能な形で\n";
+  out += "6. コーチのレッスンで相談すべきテーマの提案\n";
+  out += "7. 同じコース名のラウンドが複数ある場合のみ: そのコースで毎回崩れるホールと、次回の具体的な攻略方針(使うクラブ・狙いどころ)。天気や風の影響もあれば言及\n";
+  out += "\\n簡潔に、ただし練習ドリルは具体的に。データにない事は推測と明記してください。\\n";
+  out += "\\n# 出力形式のルール(厳守)\\n";
+  out += "- 全体で1200〜1500字程度。スマホで読む前提\\n";
+  out += "- 見出しは上記1〜6の6つだけ。小見出しや階層化した箇条書きは禁止\\n";
+  out += "- 各項目は結論を先に1文で述べ、根拠の数値を文中に織り込む(例:『OB6回は全てドライバーのスライス』)\\n";
+  out += "- 箇条書きを使ってよいのは練習ドリルと数値目標のみ。他は文章で書く\\n";
+  out += "- 前置き、要約の繰り返し、『必要なら次に〜できます』等の追加提案は書かない\\n";
+  out += "- ホール番号の羅列は避け、代表例を1〜2個挙げるにとどめる";
+  return out;
+};
+
+// ---- small UI parts ----
+function Seg({ options, value, onChange, danger = [], warn = [] }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map(o => {
+        const on = value === o;
+        const isDanger = danger.includes(o), isWarn = warn.includes(o);
+        const base = isDanger ? C.red : isWarn ? C.sand : C.green;
+        return (
+          <button key={o} onClick={() => onChange(o)}
+            className="rounded-xl font-semibold"
+            style={{
+              minHeight: 52, padding: "10px 16px", fontSize: 16, flex: "1 1 auto",
+              background: on ? base : C.card, color: on ? "#fff" : C.ink,
+              border: `2px solid ${on ? base : C.line}`,
+            }}>{o}</button>
+        );
+      })}
+    </div>
+  );
+}
+
+function MultiSeg({ options, values = [], onChange }) {
+  const toggle = o => {
+    if (o === "平ら") return onChange(["平ら"]);
+    let next = values.filter(v => v !== "平ら");
+    if (next.includes(o)) next = next.filter(v => v !== o);
+    else next = next.length >= 2 ? [next[1], o] : [...next, o];
+    onChange(next.length ? next : ["平ら"]);
+  };
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map(o => {
+        const on = values.includes(o);
+        return (
+          <button key={o} onClick={() => toggle(o)} className="rounded-xl font-semibold"
+            style={{ minHeight: 52, padding: "10px 16px", fontSize: 16, flex: "1 1 auto",
+              background: on ? C.green : C.card, color: on ? "#fff" : C.ink,
+              border: `2px solid ${on ? C.green : C.line}` }}>{o}</button>
+        );
+      })}
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <div className="mb-4">
+      <div style={{ fontSize: 13, fontWeight: 700, color: C.sub, letterSpacing: "0.06em", marginBottom: 6 }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
+function Bar({ title, left, right }) {
+  return (
+    <div className="flex items-center justify-between" style={{ padding: "14px 16px", background: C.green, color: "#fff" }}>
+      <div style={{ minWidth: 60 }}>{left}</div>
+      <div style={{ fontWeight: 800, fontSize: 17 }}>{title}</div>
+      <div style={{ minWidth: 60, textAlign: "right" }}>{right}</div>
+    </div>
+  );
+}
+
+function BigBtn({ children, onClick, kind = "primary", style }) {
+  const bg = kind === "primary" ? C.green : kind === "ghost" ? "transparent" : C.card;
+  return (
+    <button onClick={onClick} className="w-full rounded-2xl font-bold"
+      style={{ minHeight: 58, fontSize: 17, background: bg,
+        color: kind === "primary" ? "#fff" : C.ink,
+        border: kind === "primary" ? "none" : `2px solid ${C.line}`, ...style }}>
+      {children}</button>
+  );
+}
+
+// ---- main app ----
+function GolfTracker() {
+  const [screen, setScreen] = useState("loading"); // home | setup | hole | entry | holeDone | summary
+  const [rounds, setRounds] = useState([]);
+  const index = rounds.map(r => ({ id: r.id, date: r.date, course: r.course, done: r.done, score: totalScore(r) }));
+  const [round, setRound] = useState(null);
+  const [holeIdx, setHoleIdx] = useState(0);
+  const [entryKind, setEntryKind] = useState("shot"); // shot | approach | putt
+  const [draft, setDraft] = useState({});
+  const [setup, setSetup] = useState({ course: "", target: DEFAULT_PROFILE.target, date: "", weather: "晴れ", wind: "弱い", tee: "白" });
+  const [backupText, setBackupText] = useState("");
+  const [storageOk, setStorageOk] = useState(true);
+  const [profile, setProfile] = useState(DEFAULT_PROFILE);
+  const [profileDraft, setProfileDraft] = useState(DEFAULT_PROFILE);
+  const [promptText, setPromptText] = useState("");
+  const [analysisResult, setAnalysisResult] = useState("");
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisMsg, setAnalysisMsg] = useState("");
+  const [backupMsg, setBackupMsg] = useState("");
+
+  const exportAll = async () => {
+    const json = JSON.stringify({ app: "golf-tracker", exportedAt: new Date().toISOString(), profile, rounds }, null, 0);
+    setBackupText(json);
+    try { await navigator.clipboard.writeText(json); setBackupMsg(`${rounds.length}ラウンド分をコピーしました。メモ等に貼り付けて保存してください。`); }
+    catch { setBackupMsg(`${rounds.length}ラウンド分を書き出しました。下のテキストを全選択してコピーしてください。`); }
+  };
+
+  const importAll = async () => {
+    try {
+      const data = JSON.parse(backupText);
+      const inRounds = data.rounds || [];
+      if (!inRounds.length) return setBackupMsg("読み込めるラウンドがありません。");
+      const next = [...inRounds, ...rounds.filter(x => !inRounds.some(n => n.id === x.id))];
+      setRounds(next);
+      if (data.profile) setProfile({ ...DEFAULT_PROFILE, ...data.profile });
+      if (storageOk) {
+        const ok = await saveAll(next, data.profile ? { ...DEFAULT_PROFILE, ...data.profile } : profile);
+        setBackupMsg(ok ? `${inRounds.length}ラウンド分を復元しました。` : `${inRounds.length}ラウンド分を読み込みました(自動保存は失敗。この画面を開いている間は使えます)。`);
+      } else {
+        setBackupMsg(`${inRounds.length}ラウンド分を読み込みました。※自動保存が使えない環境のため、終了前に「書き出す」を忘れずに。`);
+      }
+    } catch { setBackupMsg("復元に失敗しました。貼り付けた内容がバックアップのJSONか確認してください。"); }
+  };
+
+  const loadTestData = async () => {
+    try {
+      const t = JSON.parse(TEST_DATA_JSON).rounds || [];
+      const next = [...t, ...rounds.filter(x => !t.some(n => n.id === x.id))];
+      setRounds(next);
+      if (storageOk) await saveAll(next, profile);
+      setBackupMsg("テストデータ(3ラウンド分)を読み込みました。ホームに戻ると一覧に表示されます。" + (storageOk ? "" : "(この画面を開いている間のみ有効)"));
+    } catch (e) { setBackupMsg("テストデータの読み込みに失敗しました: " + (e && e.message ? e.message : e)); }
+  };
+
+  const copyPrompt = async () => {
+    const p = buildAnalysisPrompt(rounds, profile);
+    setPromptText(p);
+    try { await navigator.clipboard.writeText(p); setAnalysisMsg("分析プロンプトをコピーしました。Gemini・ChatGPT等に貼り付けてください。"); }
+    catch { setAnalysisMsg("下のテキストを全選択してコピーしてください。"); }
+  };
+
+  const runClaude = async () => {
+    setAnalyzing(true); setAnalysisResult(""); setAnalysisMsg("");
+    try {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 1000,
+          messages: [{ role: "user", content: buildAnalysisPrompt(rounds, profile) }],
+        }),
+      });
+      const data = await response.json();
+      const text = (data.content || []).map(i => (i.type === "text" ? i.text : "")).filter(Boolean).join("\n");
+      setAnalysisResult(text || "分析結果を取得できませんでした。時間をおいて再度お試しください。");
+    } catch (e) {
+      setAnalysisResult("このHTML版ではアプリ内分析は使えません。「プロンプトをコピー」からClaude・Gemini・ChatGPT等のチャットに貼り付けてください。");
+    }
+    setAnalyzing(false);
+  };
+
+  const saveProfile = async () => {
+    const p = { ...profile, ...profileDraft,
+      avg: Number(profileDraft.avg) || profile.avg,
+      best: Number(profileDraft.best) || profile.best,
+      target: Number(profileDraft.target) || profile.target };
+    setProfile(p);
+    if (storageOk) await saveAll(rounds, p);
+    setScreen("home");
+  };
+
+  const deleteTestData = async () => {
+    const next = rounds.filter(x => !["test1","test2","test3"].includes(x.id));
+    setRounds(next);
+    if (storageOk) await saveAll(next, profile);
+    setBackupMsg("テストデータを削除しました。");
+  };
+
+  useEffect(() => { (async () => {
+    const ok = await probeStorage();
+    setStorageOk(ok);
+    if (ok) { const d = await loadAll(); setRounds(d.rounds); setProfile(d.profile); }
+    setScreen("home");
+  })(); }, []);
+
+  const hole = round?.holes?.[holeIdx];
+
+  const persist = async r => {
+    setRound(r);
+    const next = [r, ...rounds.filter(x => x.id !== r.id)];
+    setRounds(next);
+    if (storageOk) await saveAll(next, profile);
+  };
+
+  // --- round lifecycle ---
+  const startRound = async () => {
+    const r = { id: uid(), date: setup.date || new Date().toISOString().slice(0,10),
+      course: setup.course || "コース未設定", target: Number(setup.target) || 85,
+      weather: setup.weather, wind: setup.wind, tee: setup.tee, holes: [], done: false };
+    await persist(r); setHoleIdx(0); beginHole(r, 0);
+  };
+
+  const beginHole = (r, i) => {
+    setHoleIdx(i);
+    if (!r.holes[i]) setScreen("hole");
+    else { setEntryKind(defaultKind(r.holes[i])); resetDraft(r.holes[i]); setScreen("entry"); }
+  };
+
+  const setPar = async par => {
+    const holes = [...round.holes];
+    holes[holeIdx] = { n: holeIdx + 1, par, strokes: [], penalties: 0 };
+    const r = { ...round, holes };
+    await persist(r);
+    setEntryKind("shot");
+    setDraft({ lie: "ティー", slopes: ["平ら"], greenAttempt: par === 3 });
+    setScreen("entry");
+  };
+
+  const defaultKind = h => {
+    const last = h.strokes[h.strokes.length - 1];
+    if (!last) return "shot";
+    if (last.kind === "putt" || (last.kind === "shot" && last.result === "グリーンオン") ||
+        (last.kind === "approach" && (last.result === "オン"))) return "putt";
+    return "shot";
+  };
+
+  const resetDraft = h => {
+    const last = h.strokes[h.strokes.length - 1];
+    let lie = "フェアウェイ";
+    if (!last) lie = "ティー";
+    else if (last.kind === "shot") {
+      if (last.result === "ラフ" || ["手前","奥","左","右"].includes(last.result)) lie = "ラフ";
+      else if (last.result === "バンカー") lie = "バンカー";
+      else if (last.result === "OB") lie = "ティー"; // 打ち直し想定
+    } else if (last.kind === "approach" && last.result === "バンカー") lie = "バンカー";
+    setDraft({ lie, slopes: ["平ら"] });
+  };
+
+  // --- stroke commit ---
+  const commit = async () => {
+    const holes = [...round.holes];
+    const h = { ...holes[holeIdx] };
+    let stroke;
+    if (entryKind === "shot") {
+      if (!draft.club || !draft.flight || !draft.result) return alert("クラブ・球筋・結果を選択してください");
+      stroke = { kind: "shot", club: draft.club, lie: draft.lie, slopes: draft.slopes || ["平ら"], flight: draft.flight, result: draft.result, greenAttempt: !!draft.greenAttempt };
+      if (draft.result === "OB" || draft.result === "池") h.penalties = (h.penalties || 0) + 1;
+    } else if (entryKind === "approach") {
+      if (!draft.dist || !draft.club || !draft.type || !draft.result) return alert("残りヤード・クラブ・打ち方・結果を選択してください");
+      stroke = { kind: "approach", dist: Number(draft.dist), club: draft.club, type: draft.type, result: draft.result };
+    } else {
+      if (!draft.steps || !draft.pslope || !draft.line || !draft.presult) return alert("歩数・傾斜・ライン・結果を選択してください");
+      stroke = { kind: "putt", steps: Number(draft.steps), slope: draft.pslope, line: draft.line, result: draft.presult };
+    }
+    h.strokes = [...h.strokes, stroke];
+    holes[holeIdx] = h;
+    const r = { ...round, holes };
+    await persist(r);
+
+    if (stroke.kind === "putt" && stroke.result === "カップイン") { setScreen("holeDone"); return; }
+    if (stroke.kind === "approach" && stroke.result === "チップイン") { setScreen("holeDone"); return; }
+    const k = defaultKind(h);
+    setEntryKind(k);
+    if (k === "putt") setDraft({ pslope: "平ら" });
+    else resetDraft(h);
+  };
+
+  const undo = async () => {
+    const holes = [...round.holes];
+    const h = { ...holes[holeIdx] };
+    if (!h.strokes.length) return;
+    const removed = h.strokes[h.strokes.length - 1];
+    h.strokes = h.strokes.slice(0, -1);
+    if (removed.kind === "shot" && (removed.result === "OB" || removed.result === "池"))
+      h.penalties = Math.max(0, (h.penalties || 0) - 1);
+    holes[holeIdx] = h;
+    await persist({ ...round, holes });
+    setEntryKind(removed.kind);
+  };
+
+  const nextHole = async () => {
+    if (holeIdx + 1 >= 18) { await persist({ ...round, done: true }); setScreen("summary"); }
+    else { setHoleIdx(holeIdx + 1); setScreen("hole"); }
+  };
+
+  const openRound = entry => {
+    const rd = rounds.find(x => x.id === entry.id);
+    if (!rd) return alert("読み込みに失敗しました");
+    setRound(rd);
+    if (rd.done) setScreen("summary");
+    else { const i = Math.max(0, rd.holes.length - (rd.holes.length && !isHoleDone(rd.holes[rd.holes.length-1]) ? 1 : 0)); beginHole(rd, rd.holes.length === 0 ? 0 : i); }
+  };
+  const isHoleDone = h => {
+    const last = h.strokes[h.strokes.length - 1];
+    return last && ((last.kind === "putt" && last.result === "カップイン") || (last.kind === "approach" && last.result === "チップイン"));
+  };
+
+  // ---- screens ----
+  if (screen === "loading") return <div style={{ background: C.bg, minHeight: "100vh" }} />;
+
+  if (screen === "home") return (
+    <div style={{ background: C.bg, minHeight: "100vh", color: C.ink, fontFamily: "'Hiragino Sans','Noto Sans JP',sans-serif" }}>
+      <Bar title="ラウンド記録" />
+      {!storageOk && (
+        <div style={{ background: "#FBF3DC", color: "#7A5A12", padding: "10px 16px", fontSize: 13, fontWeight: 700, lineHeight: 1.6 }}>
+          この環境では自動保存が使えません(Safariのプライベートブラウズ中など)。通常のSafariタブ、またはホーム画面に追加したアイコンから開いてください。</div>
+      )}
+      <div className="p-4">
+        <BigBtn onClick={() => { setSetup(s => ({ ...s, target: profile.target, date: new Date().toISOString().slice(0,10) })); setScreen("setup"); }}>＋ 新しいラウンドを開始</BigBtn>
+        <div style={{ height: 8 }} />
+        <BigBtn kind="ghost" onClick={() => setScreen("backup")} style={{ border: `2px solid ${C.line}` }}>データのバックアップ / 復元</BigBtn>
+        <div style={{ height: 8 }} />
+        <BigBtn kind="ghost" onClick={() => { setProfileDraft(profile); setScreen("profile"); }} style={{ border: `2px solid ${C.line}` }}>プロフィール(分析の前提)を変更</BigBtn>
+        <div style={{ height: 8 }} />
+        <BigBtn onClick={() => { if (!rounds.length) return alert("分析するラウンドがまだありません"); setAnalysisMsg(""); setScreen("analysis"); }}
+          style={{ background: C.ink }}>AI分析 / 練習提案</BigBtn>
+        <div style={{ marginTop: 24, fontSize: 13, fontWeight: 700, color: C.sub }}>過去のラウンド</div>
+        {index.length === 0 && <div style={{ color: C.sub, marginTop: 8, fontSize: 15 }}>まだ記録がありません。最初のラウンドを始めましょう。</div>}
+        {index.map(e => (
+          <button key={e.id} onClick={() => openRound(e)} className="w-full rounded-xl mt-2 text-left flex justify-between items-center"
+            style={{ background: C.card, border: `1px solid ${C.line}`, padding: "14px 16px" }}>
+            <div><div style={{ fontWeight: 700 }}>{e.course}</div><div style={{ fontSize: 13, color: C.sub }}>{e.date}{e.done ? "" : "・記録中"}</div></div>
+            <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{e.score || "–"}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  if (screen === "analysis") {
+    const target = rounds.length;
+    return (
+      <div style={{ background: C.bg, minHeight: "100vh", color: C.ink, fontFamily: "'Hiragino Sans','Noto Sans JP',sans-serif" }}>
+        <Bar title="AI分析 / 練習提案" left={<button onClick={() => setScreen("home")} style={{ color: "#fff" }}>←</button>} />
+        <div className="p-4">
+          <div style={{ fontSize: 13, color: C.sub, marginBottom: 12 }}>
+            直近{Math.min(5, target)}ラウンド(全{target}ラウンド中)の1打ごとのデータとプロフィールをもとに、失点源・傾向・推移・練習の優先順位を分析します。</div>
+          <BigBtn onClick={runClaude}>{analyzing ? "分析中...(30秒ほどかかります)" : "この場でClaudeに分析してもらう"}</BigBtn>
+          <div style={{ height: 8 }} />
+          <BigBtn kind="ghost" onClick={copyPrompt} style={{ border: `2px solid ${C.line}` }}>プロンプトをコピー(Gemini・ChatGPT等に貼る用)</BigBtn>
+          {analysisMsg && <div style={{ marginTop: 10, padding: 12, borderRadius: 12, background: C.greenSoft, color: C.green, fontWeight: 700, fontSize: 14 }}>{analysisMsg}</div>}
+          {promptText && (
+            <textarea value={promptText} readOnly rows={6} className="w-full rounded-xl"
+              style={{ marginTop: 10, padding: 12, fontSize: 12, border: `2px solid ${C.line}`, background: C.card, fontFamily: "monospace" }} />
+          )}
+          {analysisResult && (
+            <div className="rounded-xl" style={{ marginTop: 14, padding: 16, background: C.card, border: `1px solid ${C.line}`, whiteSpace: "pre-wrap", fontSize: 15, lineHeight: 1.8 }}>
+              {analysisResult}</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (screen === "profile") {
+    const txt = (label, key, type) => (
+      <Field label={label}>
+        <input type={type || "text"} value={profileDraft[key] ?? ""}
+          onChange={e => setProfileDraft({ ...profileDraft, [key]: e.target.value })}
+          className="w-full rounded-xl" style={{ padding: 14, fontSize: 16, border: `2px solid ${C.line}`, background: C.card }} />
+      </Field>
+    );
+    return (
+      <div style={{ background: C.bg, minHeight: "100vh", color: C.ink, fontFamily: "'Hiragino Sans','Noto Sans JP',sans-serif" }}>
+        <Bar title="プロフィール" left={<button onClick={() => setScreen("home")} style={{ color: "#fff" }}>←</button>} />
+        <div className="p-4">
+          <div style={{ fontSize: 13, color: C.sub, marginBottom: 12 }}>AI分析の前提として使われます。状況が変わったらここを更新してください。</div>
+          {txt("平均スコア", "avg", "number")}
+          {txt("ベストスコア", "best", "number")}
+          {txt("目標スコア", "target", "number")}
+          {txt("練習頻度", "practice")}
+          {txt("レッスン", "lesson")}
+          {txt("ラウンド頻度", "roundsPerMonth")}
+          {txt("その他メモ(悩み・意識していること等)", "note")}
+          <BigBtn onClick={saveProfile}>保存する</BigBtn>
+        </div>
+      </div>
+    );
+  }
+
+  if (screen === "backup") return (
+    <div style={{ background: C.bg, minHeight: "100vh", color: C.ink, fontFamily: "'Hiragino Sans','Noto Sans JP',sans-serif" }}>
+      <Bar title="バックアップ / 復元" left={<button onClick={() => { setBackupMsg(""); setScreen("home"); }} style={{ color: "#fff" }}>←</button>} />
+      <div className="p-4">
+        <div style={{ fontSize: 14, color: C.sub, marginBottom: 12 }}>
+          全ラウンドのデータをJSONとして書き出し、iPhoneのメモやファイルに保存できます。復元は保存したJSONを下の欄に貼り付けて実行します。ラウンド後は書き出しを習慣にするのがおすすめです。</div>
+        <BigBtn onClick={exportAll}>全データを書き出す(コピー)</BigBtn>
+        <div style={{ height: 12 }} />
+        <textarea value={backupText} onChange={e => setBackupText(e.target.value)}
+          placeholder="復元する場合は、保存しておいたJSONをここに貼り付け"
+          className="w-full rounded-xl" rows={8}
+          style={{ padding: 12, fontSize: 12, border: `2px solid ${C.line}`, background: C.card, fontFamily: "monospace" }} />
+        <div style={{ height: 8 }} />
+        <BigBtn kind="ghost" onClick={importAll} style={{ border: `2px solid ${C.line}` }}>貼り付けた内容から復元する</BigBtn>
+        <div style={{ height: 20 }} />
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.sub, marginBottom: 6 }}>動作確認用</div>
+        <BigBtn kind="ghost" onClick={loadTestData} style={{ border: `2px solid ${C.line}` }}>テストデータを読み込む(3ラウンド)</BigBtn>
+        <div style={{ height: 8 }} />
+        <BigBtn kind="ghost" onClick={deleteTestData} style={{ border: `2px solid ${C.line}`, color: C.red }}>テストデータを削除する</BigBtn>
+        {backupMsg && <div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: C.greenSoft, color: C.green, fontWeight: 700, fontSize: 14 }}>{backupMsg}</div>}
+      </div>
+    </div>
+  );
+
+  if (screen === "setup") return (
+    <div style={{ background: C.bg, minHeight: "100vh", color: C.ink, fontFamily: "'Hiragino Sans','Noto Sans JP',sans-serif" }}>
+      <Bar title="ラウンド設定" left={<button onClick={() => setScreen("home")} style={{ color: "#fff" }}>←</button>} />
+      <div className="p-4">
+        <Field label="ラウンド日">
+          <input type="date" value={setup.date} onChange={e => setSetup({ ...setup, date: e.target.value })}
+            className="w-full rounded-xl" style={{ padding: 14, fontSize: 16, border: `2px solid ${C.line}`, background: C.card }} />
+        </Field>
+        <Field label="コース名(過去のコースはタップで選択)">
+          {[...new Set(rounds.map(r => r.course).filter(c => c && c !== "コース未設定"))].slice(0, 6).length > 0 && (
+            <div className="flex flex-wrap gap-2" style={{ marginBottom: 8 }}>
+              {[...new Set(rounds.map(r => r.course).filter(c => c && c !== "コース未設定"))].slice(0, 6).map(c => (
+                <button key={c} onClick={() => setSetup({ ...setup, course: c })} className="rounded-xl font-semibold"
+                  style={{ minHeight: 44, padding: "8px 14px", fontSize: 14,
+                    background: setup.course === c ? C.green : C.card, color: setup.course === c ? "#fff" : C.ink,
+                    border: `2px solid ${setup.course === c ? C.green : C.line}` }}>{c}</button>
+              ))}
+            </div>
+          )}
+          <input value={setup.course} onChange={e => setSetup({ ...setup, course: e.target.value })}
+            placeholder="例:霞ヶ関CC" className="w-full rounded-xl"
+            style={{ padding: 14, fontSize: 16, border: `2px solid ${C.line}`, background: C.card }} />
+        </Field>
+        <Field label="天気"><Seg options={["晴れ","曇り","雨"]} value={setup.weather} onChange={v => setSetup({ ...setup, weather: v })} /></Field>
+        <Field label="風"><Seg options={["弱い","普通","強い"]} value={setup.wind} onChange={v => setSetup({ ...setup, wind: v })} /></Field>
+        <Field label="使用ティー"><Seg options={["赤","白","青","ゴールド"]} value={setup.tee} onChange={v => setSetup({ ...setup, tee: v })} /></Field>
+        <Field label="目標スコア">
+          <input type="number" value={setup.target} onChange={e => setSetup({ ...setup, target: e.target.value })}
+            className="w-full rounded-xl" style={{ padding: 14, fontSize: 16, border: `2px solid ${C.line}`, background: C.card }} />
+        </Field>
+        <BigBtn onClick={startRound}>1番ホールへ</BigBtn>
+      </div>
+    </div>
+  );
+
+  if (screen === "hole") return (
+    <div style={{ background: C.bg, minHeight: "100vh", color: C.ink, fontFamily: "'Hiragino Sans','Noto Sans JP',sans-serif" }}>
+      <Bar title={`HOLE ${holeIdx + 1}`} left={<button onClick={() => setScreen("home")} style={{ color: "#fff" }}>←</button>}
+        right={<span style={{ fontVariantNumeric: "tabular-nums" }}>計 {totalScore(round)}</span>} />
+      <div className="p-4">
+        <Field label="このホールのパー">
+          <div className="flex gap-3">
+            {[3,4,5].map(p => (
+              <button key={p} onClick={() => setPar(p)} className="flex-1 rounded-2xl font-extrabold"
+                style={{ height: 92, fontSize: 34, background: C.card, border: `2px solid ${C.line}`, color: C.ink }}>
+                {p}</button>
+            ))}
+          </div>
+        </Field>
+      </div>
+    </div>
+  );
+
+  if (screen === "entry" && hole) {
+    const strokeNo = hole.strokes.length + 1 + (hole.penalties || 0);
+    return (
+      <div style={{ background: C.bg, minHeight: "100vh", color: C.ink, fontFamily: "'Hiragino Sans','Noto Sans JP',sans-serif", paddingBottom: 120 }}>
+        <Bar title={`HOLE ${hole.n}・PAR ${hole.par}`} left={<button onClick={() => setScreen("home")} style={{ color: "#fff" }}>←</button>}
+          right={<span style={{ fontVariantNumeric: "tabular-nums" }}>{strokeNo}打目</span>} />
+        {hole.penalties > 0 && (
+          <div style={{ background: "#F7E5E2", color: C.red, padding: "8px 16px", fontSize: 13, fontWeight: 700 }}>
+            ペナルティ +{hole.penalties}打(スコアに自動加算)</div>
+        )}
+        <div className="p-4">
+          <div className="flex gap-2 mb-4">
+            {[["shot","ショット"],["approach","グリーン周り"],["putt","パット"]].map(([k,label]) => (
+              <button key={k} onClick={() => { setEntryKind(k); k === "putt" ? setDraft({ pslope: "平ら" }) : resetDraft(hole); }}
+                className="flex-1 rounded-full font-bold" style={{ height: 44, fontSize: 14,
+                  background: entryKind === k ? C.ink : "transparent", color: entryKind === k ? "#fff" : C.sub,
+                  border: `2px solid ${entryKind === k ? C.ink : C.line}` }}>{label}</button>
+            ))}
+          </div>
+
+          {entryKind === "shot" && <>
+            <Field label="クラブ">
+              <div className="grid grid-cols-5 gap-2">
+                {CLUBS.map(c => (
+                  <button key={c} onClick={() => setDraft({ ...draft, club: c })} className="rounded-xl font-bold"
+                    style={{ height: 50, fontSize: 15, background: draft.club === c ? C.green : C.card,
+                      color: draft.club === c ? "#fff" : C.ink, border: `2px solid ${draft.club === c ? C.green : C.line}` }}>{c}</button>
+                ))}
+              </div>
+            </Field>
+            <Field label="ライ"><Seg options={LIES} value={draft.lie} onChange={v => setDraft({ ...draft, lie: v })} /></Field>
+            <Field label="傾斜(複合傾斜は2つまで選択可)"><MultiSeg options={SLOPES} values={draft.slopes || ["平ら"]} onChange={v => setDraft({ ...draft, slopes: v })} /></Field>
+            <Field label="球筋"><Seg options={FLIGHTS} value={draft.flight} onChange={v => setDraft({ ...draft, flight: v })} /></Field>
+            <Field label="グリーンを狙ったショット?">
+              <div className="flex gap-2">
+                {[[true,"狙った"],[false,"狙っていない"]].map(([v,label]) => (
+                  <button key={label} onClick={() => setDraft({ ...draft, greenAttempt: v, result: undefined })}
+                    className="flex-1 rounded-xl font-semibold"
+                    style={{ minHeight: 52, fontSize: 16, background: !!draft.greenAttempt === v ? C.green : C.card,
+                      color: !!draft.greenAttempt === v ? "#fff" : C.ink,
+                      border: `2px solid ${!!draft.greenAttempt === v ? C.green : C.line}` }}>{label}</button>
+                ))}
+              </div>
+            </Field>
+            <Field label={draft.greenAttempt ? "結果(オン or 外した方向)" : "結果(ボールが行った先)"}>
+              <Seg options={draft.greenAttempt ? SHOT_RESULTS_GREEN : SHOT_RESULTS}
+                value={draft.result} onChange={v => setDraft({ ...draft, result: v })}
+                danger={["OB","池"]} warn={["バンカー"]} /></Field>
+          </>}
+
+          {entryKind === "approach" && <>
+            <Field label="残りヤード">
+              <div className="flex flex-wrap gap-2">
+                {[10,20,30,40,50,60,80,100].map(y => (
+                  <button key={y} onClick={() => setDraft({ ...draft, dist: y })} className="rounded-xl font-bold"
+                    style={{ height: 50, padding: "0 14px", flex: "1 1 auto", fontSize: 16,
+                      background: draft.dist === y ? C.green : C.card, color: draft.dist === y ? "#fff" : C.ink,
+                      border: `2px solid ${draft.dist === y ? C.green : C.line}` }}>{y}y</button>
+                ))}
+              </div>
+              <input type="number" placeholder="直接入力(y)" value={draft.dist ?? ""} onChange={e => setDraft({ ...draft, dist: e.target.value })}
+                className="w-full rounded-xl mt-2" style={{ padding: 12, fontSize: 16, border: `2px solid ${C.line}`, background: C.card }} />
+            </Field>
+            <Field label="クラブ">
+              <div className="grid grid-cols-5 gap-2">
+                {["PW","AW","SW","58°","9I","8I","7I","6U","パター"].map(c => (
+                  <button key={c} onClick={() => setDraft({ ...draft, club: c })} className="rounded-xl font-bold"
+                    style={{ height: 50, fontSize: 14, background: draft.club === c ? C.green : C.card,
+                      color: draft.club === c ? "#fff" : C.ink, border: `2px solid ${draft.club === c ? C.green : C.line}` }}>{c}</button>
+                ))}
+              </div>
+            </Field>
+            <Field label="打ち方"><Seg options={APP_TYPES} value={draft.type} onChange={v => setDraft({ ...draft, type: v })} /></Field>
+            <Field label="結果"><Seg options={APP_RESULTS} value={draft.result} onChange={v => setDraft({ ...draft, result: v })} warn={["バンカー"]} /></Field>
+          </>}
+
+          {entryKind === "putt" && <>
+            <Field label="残り距離(歩数)">
+              <div className="flex flex-wrap gap-2">
+                {STEP_PRESETS.map(s => (
+                  <button key={s} onClick={() => setDraft({ ...draft, steps: s })} className="rounded-xl font-bold"
+                    style={{ height: 50, padding: "0 16px", flex: "1 1 auto", fontSize: 16,
+                      background: draft.steps === s ? C.green : C.card, color: draft.steps === s ? "#fff" : C.ink,
+                      border: `2px solid ${draft.steps === s ? C.green : C.line}` }}>{s}歩</button>
+                ))}
+              </div>
+            </Field>
+            <Field label="傾斜"><Seg options={PUTT_SLOPES} value={draft.pslope} onChange={v => setDraft({ ...draft, pslope: v })} /></Field>
+            <Field label="ライン"><Seg options={PUTT_LINES} value={draft.line} onChange={v => setDraft({ ...draft, line: v })} /></Field>
+            <Field label="結果"><Seg options={PUTT_RESULTS} value={draft.presult} onChange={v => setDraft({ ...draft, presult: v })} /></Field>
+          </>}
+
+          <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, padding: 12, background: C.bg, borderTop: `1px solid ${C.line}` }}>
+            <div className="flex gap-2">
+              <button onClick={undo} className="rounded-2xl font-bold" style={{ minHeight: 58, padding: "0 18px", background: C.card, border: `2px solid ${C.line}`, color: C.sub }}>取消</button>
+              <div style={{ flex: 1 }}><BigBtn onClick={commit}>この1打を記録</BigBtn></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (screen === "holeDone" && hole) {
+    const sc = holeScore(hole), diff = sc - hole.par;
+    const label = diff <= -2 ? "イーグル!" : diff === -1 ? "バーディ!" : diff === 0 ? "パー" : diff === 1 ? "ボギー" : diff === 2 ? "ダブルボギー" : `+${diff}`;
+    return (
+      <div style={{ background: C.bg, minHeight: "100vh", color: C.ink, fontFamily: "'Hiragino Sans','Noto Sans JP',sans-serif" }}>
+        <Bar title={`HOLE ${hole.n} 終了`} right={<span style={{ fontVariantNumeric: "tabular-nums" }}>計 {totalScore(round)}</span>} />
+        <div className="p-4 text-center">
+          <div style={{ marginTop: 32, fontSize: 64, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{sc}</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: diff <= 0 ? C.green : diff >= 2 ? C.red : C.ink }}>{label}</div>
+          <div style={{ color: C.sub, marginTop: 8, fontSize: 14 }}>パット {puttCount(hole)}回{hole.penalties ? `・ペナルティ ${hole.penalties}打` : ""}</div>
+          <div style={{ marginTop: 40 }}>
+            <BigBtn onClick={nextHole}>{holeIdx + 1 >= 18 ? "ラウンド終了・集計へ" : `HOLE ${holeIdx + 2} へ`}</BigBtn>
+            <div style={{ height: 10 }} />
+            <BigBtn kind="ghost" onClick={async () => { await persist({ ...round, done: true }); setScreen("summary"); }}
+              style={{ border: `2px solid ${C.line}` }}>ここでラウンドを終える</BigBtn>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (screen === "summary" && round) {
+    const holes = round.holes;
+    const total = totalScore(round);
+    const putts = holes.reduce((s,h) => s + puttCount(h), 0);
+    const allStrokes = holes.flatMap(h => h.strokes || []);
+    const obCount = allStrokes.filter(s => s.kind === "shot" && s.result === "OB").length;
+    const waterCount = allStrokes.filter(s => s.kind === "shot" && s.result === "池").length;
+    const bunkerCount = allStrokes.filter(s => (s.kind === "shot" || s.kind === "approach") && s.result === "バンカー").length;
+    const threePutt = holes.filter(h => puttCount(h) >= 3).length;
+    const dblPlus = holes.filter(h => holeScore(h) - h.par >= 2).length;
+    const teeHoles = holes.filter(h => h.par >= 4 && h.strokes[0]?.kind === "shot");
+    const fwKeep = teeHoles.length ? Math.round(100 * teeHoles.filter(h => h.strokes[0].result === "フェアウェイ").length / teeHoles.length) : 0;
+    const gir = holes.filter(h => {
+      const limit = h.par - 2;
+      return h.strokes.some((s,i) => i < limit && ((s.kind === "shot" && s.result === "グリーンオン") || (s.kind === "approach" && ["オン","チップイン"].includes(s.result))));
+    }).length;
+    const stat = (label, val) => (
+      <div className="rounded-xl" style={{ background: C.card, border: `1px solid ${C.line}`, padding: 14, textAlign: "center" }}>
+        <div style={{ fontSize: 24, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{val}</div>
+        <div style={{ fontSize: 12, color: C.sub, fontWeight: 700 }}>{label}</div>
+      </div>
+    );
+    return (
+      <div style={{ background: C.bg, minHeight: "100vh", color: C.ink, fontFamily: "'Hiragino Sans','Noto Sans JP',sans-serif" }}>
+        <Bar title="ラウンド結果" left={<button onClick={() => setScreen("home")} style={{ color: "#fff" }}>←</button>} />
+        <div className="p-4">
+          <div className="text-center" style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 56, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{total}</div>
+            <div style={{ color: C.sub, fontSize: 14 }}>{round.course}・{round.date}・目標 {round.target}{round.weather ? `・${round.weather}/風${round.wind}/${round.tee}T` : ""}</div>
+          </div>
+          <div className="grid grid-cols-3 gap-2 mb-4">
+            {stat("FWキープ率", fwKeep + "%")}{stat("パーオン", gir + "H")}{stat("総パット", putts)}
+            {stat("3パット", threePutt + "回")}{stat("ダボ以上", dblPlus + "H")}{stat("OB", obCount + "回")}
+            {stat("池", waterCount + "回")}{stat("バンカー", bunkerCount + "回")}
+          </div>
+          <div className="rounded-xl" style={{ background: C.card, border: `1px solid ${C.line}`, overflow: "hidden" }}>
+            {holes.map(h => {
+              const d = holeScore(h) - h.par;
+              return (
+                <div key={h.n} className="flex justify-between items-center" style={{ padding: "10px 16px", borderBottom: `1px solid ${C.line}` }}>
+                  <div style={{ color: C.sub, fontSize: 14 }}>H{h.n}・PAR{h.par}</div>
+                  <div className="flex items-center gap-3">
+                    <span style={{ fontSize: 13, color: C.sub }}>P{puttCount(h)}</span>
+                    <span style={{ fontWeight: 800, fontVariantNumeric: "tabular-nums", color: d <= -1 ? C.green : d >= 2 ? C.red : C.ink, minWidth: 28, textAlign: "right" }}>{holeScore(h)}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ height: 16 }} />
+          <BigBtn onClick={() => setScreen("home")}>ホームへ戻る</BigBtn>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+
+ReactDOM.createRoot(document.getElementById("root")).render(<GolfTracker />);
+</script>
+</body>
+</html>

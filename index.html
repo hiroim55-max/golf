@@ -72,10 +72,11 @@ const APP_TYPES = ["ランニング","ピッチ&ラン","ロブ","その他"];
 const APP_RESULTS = ["オン","チップイン","手前に外す","奥に外す","バンカー"];
 const PUTT_SLOPES = ["上り","平ら","下り"];
 const PUTT_LINES = ["ストレート","フック","スライス"];
-const PUTT_RESULTS = ["カップイン","ショート","オーバー"];
+const PUTT_RESULTS = ["カップイン","ショート","オーバー","左","右"];
 const STEP_PRESETS = [1,2,3,4,5,7,10,15,20];
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+const holeNumberAt = (idx, startHole) => (((startHole || 1) - 1 + idx) % 18) + 1;
 
 const DEFAULT_PROFILE = {
   avg: 90, best: 85, target: 85,
@@ -310,7 +311,7 @@ function GolfTracker() {
   const [holeIdx, setHoleIdx] = useState(0);
   const [entryKind, setEntryKind] = useState("shot"); // shot | approach | putt
   const [draft, setDraft] = useState({});
-  const [setup, setSetup] = useState({ course: "", target: DEFAULT_PROFILE.target, date: "", weather: "晴れ", wind: "弱い", tee: "白" });
+  const [setup, setSetup] = useState({ course: "", target: DEFAULT_PROFILE.target, date: "", weather: "晴れ", wind: "弱い", tee: "白", startHole: 1 });
   const [backupText, setBackupText] = useState("");
   const [storageOk, setStorageOk] = useState(true);
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
@@ -428,7 +429,7 @@ function GolfTracker() {
   const startRound = async () => {
     const r = { id: uid(), date: setup.date || new Date().toISOString().slice(0,10),
       course: setup.course || "コース未設定", target: Number(setup.target) || 85,
-      weather: setup.weather, wind: setup.wind, tee: setup.tee, holes: [], done: false };
+      weather: setup.weather, wind: setup.wind, tee: setup.tee, startHole: Number(setup.startHole) || 1, holes: [], done: false };
     await persist(r); setHoleIdx(0); beginHole(r, 0);
   };
 
@@ -440,7 +441,7 @@ function GolfTracker() {
 
   const setPar = async par => {
     const holes = [...round.holes];
-    holes[holeIdx] = { n: holeIdx + 1, par, strokes: [], penalties: 0 };
+    holes[holeIdx] = { n: holeNumberAt(holeIdx, round.startHole), par, strokes: [], penalties: 0 };
     const r = { ...round, holes };
     await persist(r);
     setEntryKind("shot");
@@ -656,6 +657,15 @@ function GolfTracker() {
           <input type="date" value={setup.date} onChange={e => setSetup({ ...setup, date: e.target.value })}
             className="w-full rounded-xl" style={{ padding: 14, fontSize: 16, border: `2px solid ${C.line}`, background: C.card }} />
         </Field>
+        <Field label="スタートホール">
+          <div className="flex gap-3">
+            {[[1,"1番から(アウトスタート)"],[10,"10番から(インスタート)"]].map(([v,label]) => (
+              <button key={v} onClick={() => setSetup({ ...setup, startHole: v })} className="flex-1 rounded-xl font-semibold"
+                style={{ minHeight: 52, fontSize: 14, background: setup.startHole === v ? C.green : C.card,
+                  color: setup.startHole === v ? "#fff" : C.ink, border: `2px solid ${setup.startHole === v ? C.green : C.line}` }}>{label}</button>
+            ))}
+          </div>
+        </Field>
         <Field label="コース名(過去のコースはタップで選択)">
           {[...new Set(rounds.map(r => r.course).filter(c => c && c !== "コース未設定"))].slice(0, 6).length > 0 && (
             <div className="flex flex-wrap gap-2" style={{ marginBottom: 8 }}>
@@ -685,7 +695,7 @@ function GolfTracker() {
 
   if (screen === "hole") return (
     <div style={{ background: C.bg, minHeight: "100vh", color: C.ink, fontFamily: "'Hiragino Sans','Noto Sans JP',sans-serif" }}>
-      <Bar title={`HOLE ${holeIdx + 1}`} left={<button onClick={() => setScreen("home")} style={{ color: "#fff" }}>←</button>}
+      <Bar title={`HOLE ${holeNumberAt(holeIdx, round.startHole)}`} left={<button onClick={() => setScreen("home")} style={{ color: "#fff" }}>←</button>}
         right={<span style={{ fontVariantNumeric: "tabular-nums" }}>計 {totalScore(round)}</span>} />
       <div className="p-4">
         <Field label="このホールのパー">
@@ -815,7 +825,7 @@ function GolfTracker() {
           <div style={{ fontSize: 20, fontWeight: 700, color: diff <= 0 ? C.green : diff >= 2 ? C.red : C.ink }}>{label}</div>
           <div style={{ color: C.sub, marginTop: 8, fontSize: 14 }}>パット {puttCount(hole)}回{hole.penalties ? `・ペナルティ ${hole.penalties}打` : ""}</div>
           <div style={{ marginTop: 40 }}>
-            <BigBtn onClick={nextHole}>{holeIdx + 1 >= 18 ? "ラウンド終了・集計へ" : `HOLE ${holeIdx + 2} へ`}</BigBtn>
+            <BigBtn onClick={nextHole}>{holeIdx + 1 >= 18 ? "ラウンド終了・集計へ" : `HOLE ${holeNumberAt(holeIdx + 1, round.startHole)} へ`}</BigBtn>
             <div style={{ height: 10 }} />
             <BigBtn kind="ghost" onClick={async () => { const done = { ...round, done: true }; await persist(done); autoDownloadBackup([done, ...rounds.filter(x => x.id !== done.id)], profile); setScreen("summary"); }}
               style={{ border: `2px solid ${C.line}` }}>ここでラウンドを終える</BigBtn>
